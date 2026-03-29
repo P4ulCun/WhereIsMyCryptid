@@ -35,12 +35,12 @@ Open the newly created `.env` file and configure:
 
 **Start the Backend (First time, to build the image):**
 ```bash
-    docker compose up -d --build
+docker compose up -d --build
 ```
 
 **Start the Backend (Subsequent times):**
 ```bash
-    docker compose up -d
+docker compose up -d
 ```
 
 *The API will be available at `http://localhost:8000`. You can view the swagger documentation at `http://localhost:8000/docs`.*
@@ -60,18 +60,18 @@ Open `.env` and configure:
 
 **Start the Frontend (First time, to build the image):**
 ```bash
-    docker compose up -d --build
+docker compose up -d --build
 ```
 
 **Start the Frontend (Subsequent times):**
 ```bash
-    docker compose up -d
+docker compose up -d
 ```
 
 or 
 
 ```bash
-    npm run dev
+npm run dev
 ```
 
 ## Admin Override Feature
