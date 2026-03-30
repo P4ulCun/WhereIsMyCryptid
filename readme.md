@@ -1,5 +1,7 @@
 # Cryptid Solver
 
+### Check out the live demo at: https://where-is-my-cryptid.vercel.app/
+
 Cryptid Solver is a full-stack web application designed to help players solve the board game [Cryptid](https://boardgamegeek.com/boardgame/246784/cryptid). By uploading a photo of your assembled game board, the application uses computer vision to parse the board's state, map out the territories, and evaluate player hints to logically deduce the location of the Cryptid.
 
 ## Tech Stack

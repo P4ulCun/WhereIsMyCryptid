@@ -38,13 +38,18 @@ interface BoardState {
   structures: StructureData[];
   isLoading: boolean;
   error: string | null;
+  isUploadsEnabled: boolean;
   updateHex: (id: string, updates: Partial<Hexagon>) => void;
   fetchBoardState: (file: File) => Promise<void>;
   evaluateHints: (hints: Hint[]) => Promise<void>;
   updatePiece: (gridPosition: number, pieceNumber: number, isFlipped: boolean) => Promise<void>;
+  toggleUploads: (enabled: boolean) => Promise<void>;
+  refreshConfig: () => Promise<void>;
+  fetchAdminStats: () => Promise<Array<{key: string, count: number}> | null>;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = rawApiUrl.endsWith('/') ? rawApiUrl.slice(0, -1) : rawApiUrl;
 
 const BoardContext = createContext<BoardState | undefined>(undefined);
 
@@ -77,6 +82,7 @@ export const BoardProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [hexes, setHexes] = useState<Hexagon[]>(generateMockGrid());
   const [pieces, setPieces] = useState<DetectedPiece[]>([]);
   const [structures, setStructures] = useState<StructureData[]>([]);
+  const [isUploadsEnabled, setIsUploadsEnabled] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,9 +114,9 @@ export const BoardProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
 
       if (!response.ok) {
-        if (response.status === 429) {
+        if (response.status === 429 || response.status === 503) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.detail || "You have reached your daily limit. Come back tomorrow!");
+          throw new Error(errorData.detail || "Uploads are currently restricted.");
         }
         throw new Error(`API error: ${response.statusText}`);
       }
@@ -156,11 +162,17 @@ export const BoardProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         }))
       };
 
+      const adminToken = localStorage.getItem('adminToken');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (adminToken) {
+        headers['X-Admin-Token'] = adminToken;
+      }
+
       const response = await fetch(`${API_BASE_URL}/evaluate-hints`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           board_state: boardStatePayload,
           hints: hints
@@ -197,9 +209,15 @@ export const BoardProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
 
     try {
+      const adminToken = localStorage.getItem('adminToken');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (adminToken) {
+        headers['X-Admin-Token'] = adminToken;
+      }
+
       const response = await fetch(`${API_BASE_URL}/update-piece`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           pieces,
           structures,
@@ -212,7 +230,7 @@ export const BoardProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
 
       const data = await response.json();
-      
+
       const mappedHexes: Hexagon[] = data.hexes.map((node: any) => ({
         id: `${node.q}-${node.r}`,
         q: node.q,
@@ -234,9 +252,78 @@ export const BoardProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setIsLoading(false);
     }
   }, [pieces, structures]);
+  
+  const refreshConfig = useCallback(async () => {
+    const adminToken = localStorage.getItem('adminToken');
+    if (!adminToken) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/config`, {
+        headers: { 'X-Admin-Token': adminToken }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setIsUploadsEnabled(data.uploads_enabled);
+      }
+    } catch (err) {
+      console.error("Failed to fetch config:", err);
+    }
+  }, []);
+
+  const toggleUploads = useCallback(async (enabled: boolean) => {
+    const adminToken = localStorage.getItem('adminToken');
+    if (!adminToken) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/config`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Admin-Token': adminToken 
+        },
+        body: JSON.stringify({ uploads_enabled: enabled })
+      });
+      
+      if (response.ok) {
+        setIsUploadsEnabled(enabled);
+      } else {
+        throw new Error("Failed to update remote config");
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const fetchAdminStats = useCallback(async () => {
+    const adminToken = localStorage.getItem('adminToken');
+    if (!adminToken) return null;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/stats`, {
+        headers: { 'X-Admin-Token': adminToken }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data.stats;
+      }
+    } catch (err) {
+      console.error("Failed to fetch stats:", err);
+    }
+    return null;
+  }, []);
+
+  React.useEffect(() => {
+    refreshConfig();
+  }, [refreshConfig]);
 
   return (
-    <BoardContext.Provider value={{ hexes, pieces, structures, isLoading, error, updateHex, fetchBoardState, evaluateHints, updatePiece }}>
+    <BoardContext.Provider value={{ 
+      hexes, pieces, structures, isLoading, error, isUploadsEnabled,
+      updateHex, fetchBoardState, evaluateHints, updatePiece, toggleUploads, refreshConfig, fetchAdminStats 
+    }}>
       {children}
     </BoardContext.Provider>
   );

@@ -11,17 +11,30 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({ onComplete }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [loadingText, setLoadingText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { fetchBoardState, error } = useBoard();
+  const { fetchBoardState, error, isUploadsEnabled, toggleUploads, fetchAdminStats } = useBoard();
   const [secretClicks, setSecretClicks] = useState(0);
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
+  const [adminStats, setAdminStats] = useState<Array<{key: string, count: number}> | null>(null);
+
+  React.useEffect(() => {
+    if (showAdminDashboard) {
+      fetchAdminStats().then(stats => setAdminStats(stats));
+    }
+  }, [showAdminDashboard, fetchAdminStats]);
 
   const handleSecretClick = () => {
     const newCount = secretClicks + 1;
     setSecretClicks(newCount);
     if (newCount === 5) {
+      if (localStorage.getItem('adminToken')) {
+        setShowAdminDashboard(true);
+        setSecretClicks(0);
+        return;
+      }
       const pwd = window.prompt("Admin override passcode:");
       if (pwd) {
         localStorage.setItem('adminToken', pwd);
-        alert("Admin mode active.");
+        setShowAdminDashboard(true);
       }
       setSecretClicks(0);
     }
@@ -90,6 +103,43 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({ onComplete }) => {
             Cryptid Solver
           </h1>
           <p className="text-slate-400 text-lg">Upload your game board to begin</p>
+          
+          {showAdminDashboard && (
+            <div className="mt-4 p-4 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 backdrop-blur-md animate-in zoom-in-95 duration-300">
+              <div className="flex items-center justify-between gap-8">
+                <span className="text-indigo-200 font-medium">Global Board Uploads</span>
+                <button
+                  onClick={() => toggleUploads(!isUploadsEnabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                    isUploadsEnabled ? 'bg-emerald-500' : 'bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      isUploadsEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {adminStats && (
+                <div className="mt-5 border-t border-indigo-500/30 pt-4">
+                  <h4 className="text-indigo-300 text-sm font-semibold mb-3">Today's API Usage</h4>
+                  <ul className="text-slate-300 text-sm space-y-2">
+                    {adminStats.map(stat => (
+                      <li key={stat.key} className="flex justify-between items-center bg-slate-800/50 p-2 rounded-lg">
+                        <span className="font-mono text-xs">{stat.key}</span>
+                        <span className="font-bold text-indigo-400">{stat.count}</span>
+                      </li>
+                    ))}
+                    {adminStats.length === 0 && (
+                      <li className="text-slate-500 italic text-center py-2">No usage recorded today.</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div

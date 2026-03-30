@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple, Dict
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile, Request, Header
-from database import get_usage, increment_usage
+from database import get_usage, increment_usage, get_setting, set_setting, get_all_usage
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from google import genai
@@ -374,8 +374,15 @@ async def parse_image(
         admin_secret = os.getenv("ADMIN_SECRET")
         is_admin = (admin_secret and x_admin_token == admin_secret)
         
-        client_ip = "unknown"
+        # Extract client IP early for tracking
+        client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+        client_ip = client_ip.split(",")[0].strip() # Handle proxies
+
         if not is_admin:
+            # Check Global toggle
+            if get_setting("uploads_enabled", "false") == "false":
+                raise HTTPException(status_code=503, detail="Board uploads are currently disabled by the administrator.")
+
             # Check Global limit
             daily_global_limit = int(os.getenv("DAILY_GLOBAL_LIMIT", "100"))
             global_usage = get_usage("global")
@@ -384,15 +391,16 @@ async def parse_image(
             
             # Check IP limit
             daily_ip_limit = int(os.getenv("DAILY_IP_LIMIT", "3"))
-            client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
-            client_ip = client_ip.split(",")[0].strip() # Handle proxies
             
             ip_usage = get_usage(f"ip:{client_ip}")
             if ip_usage >= daily_ip_limit:
                 raise HTTPException(status_code=429, detail=f"You have reached your daily limit of {daily_ip_limit} uploads. Come back tomorrow!")
 
-            # Increment usage 
-            increment_usage("global")
+        # Always track usage (Admins bypass limits above, but still count towards quota)
+        increment_usage("global")
+        if is_admin:
+            increment_usage(f"admin:{client_ip}")
+        else:
             increment_usage(f"ip:{client_ip}")
 
         contents = await file.read()
@@ -436,6 +444,36 @@ async def update_piece(request: UpdatePieceRequest):
     )
     return build_board_state(detection_result)
 
+
+@app.get("/admin/config")
+async def get_admin_config(x_admin_token: Optional[str] = Header(None)):
+    admin_secret = os.getenv("ADMIN_SECRET")
+    if not admin_secret or x_admin_token != admin_secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    return {
+        "uploads_enabled": get_setting("uploads_enabled", "false") == "true"
+    }
+
+@app.post("/admin/config")
+async def update_admin_config(config: dict, x_admin_token: Optional[str] = Header(None)):
+    admin_secret = os.getenv("ADMIN_SECRET")
+    if not admin_secret or x_admin_token != admin_secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    if "uploads_enabled" in config:
+        set_setting("uploads_enabled", "true" if config["uploads_enabled"] else "false")
+    
+    return {"status": "updated"}
+
+@app.get("/admin/stats")
+async def get_admin_stats(x_admin_token: Optional[str] = Header(None)):
+    admin_secret = os.getenv("ADMIN_SECRET")
+    if not admin_secret or x_admin_token != admin_secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    usage_data = get_all_usage()
+    return {"stats": usage_data}
 
 @app.get("/health")
 async def health():
